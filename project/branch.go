@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/alibaba/git-repo-go/common"
@@ -103,6 +104,8 @@ func (v Repository) RemoteMatchingBranch(remote, branch string) string {
 
 // DeleteBranch deletes a branch.
 func (v Repository) DeleteBranch(branch string) error {
+	var err error
+
 	// TODO: go-git fail to delete a branch
 	// TODO: return v.Raw().DeleteBranch(branch)
 	if common.IsHead(branch) {
@@ -110,12 +113,26 @@ func (v Repository) DeleteBranch(branch string) error {
 	}
 	cmdArgs := []string{
 		GIT,
-		"branch",
-		"-D",
-		branch,
-		"--",
+		"update-ref",
+		"--stdin",
 	}
-	return executeCommandIn(v.GitDir, cmdArgs)
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stdin, "delete %s%s\n", config.RefsHeads, branch)
+	fmt.Fprintf(stdin, "delete %s%s\n", config.RefsPub, branch)
+	stdin.Close()
+
+	if err = cmd.Wait(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // UpdateRef creates new reference.
