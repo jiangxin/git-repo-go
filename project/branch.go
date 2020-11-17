@@ -102,8 +102,61 @@ func (v Repository) RemoteMatchingBranch(remote, branch string) string {
 	return config.RefsRemotes + remote + "/" + branch
 }
 
-// DeleteBranch deletes a branch.
-func (v Repository) DeleteBranch(branch string) error {
+// IsBranchSafeToDelete indicates a branch is safe to delete.
+func (v Repository) IsBranchSafeToDelete(branch string) bool {
+	branchID, err := v.ResolveRevision(branch)
+	if err != nil {
+		log.Warnf("cannot resolve branch '%s'", branch)
+		return false
+	}
+	if v.Revision != "" && common.IsImmutable(v.Revision) {
+		revID, err := v.ResolveRevision(v.Revision)
+		if err != nil {
+			log.Warnf("cannot resolve revision '%s'", v.Revision)
+			return false
+		}
+		if revID == branchID {
+			return true
+		}
+	}
+	trackID, err := v.ResolveRemoteTracking(branch)
+	if err == nil {
+		localChanges, err := v.Revlist(branchID, "--not", trackID)
+		if err != nil {
+			log.Warnf("rev-list from track of '%s' failed: %s", branch, err)
+			return false
+		}
+		if len(localChanges) > 0 {
+			return false
+		}
+		return true
+	}
+
+	pubID := v.PublishedRevision(branch)
+	if pubID != "" {
+		if pubID == branchID {
+			return true
+		}
+	}
+	return false
+}
+
+// IsSafeToDelete indicates a project is safe to delete
+func (v Project) IsSafeToDelete() bool {
+	for _, branch := range v.Heads() {
+		if !v.IsBranchSafeToDelete(branch.Name) {
+			log.Debugf("%sbranch '%s' is not safe to delete", v.Prompt(), branch)
+			return false
+		}
+	}
+	if !v.IsClean() {
+		return false
+	}
+	return true
+}
+
+// DeleteBranchByForce deletes a branch.
+func (v Repository) DeleteBranchByForce(branch string) error {
 	var err error
 
 	// TODO: go-git fail to delete a branch
@@ -170,7 +223,7 @@ func (v Repository) UpdateRef(refname, base, reason string) error {
 }
 
 // RemoteTracking returns name of current remote tracking branch.
-func (v Project) RemoteTracking(rev string) string {
+func (v Repository) RemoteTracking(rev string) string {
 	if rev == "" || common.IsSha(rev) {
 		return ""
 	}
@@ -184,7 +237,7 @@ func (v Project) RemoteTracking(rev string) string {
 }
 
 // ResolveRevision checks and resolves reference to revid.
-func (v Project) ResolveRevision(rev string) (string, error) {
+func (v Repository) ResolveRevision(rev string) (string, error) {
 	if rev == "" {
 		return "", nil
 	}
@@ -206,7 +259,7 @@ func (v Project) ResolveRevision(rev string) (string, error) {
 }
 
 // ResolveRemoteTracking returns revision id of current remote tracking branch.
-func (v Project) ResolveRemoteTracking(rev string) (string, error) {
+func (v Repository) ResolveRemoteTracking(rev string) (string, error) {
 	raw := v.Raw()
 	if raw == nil {
 		return "", fmt.Errorf("repository for %s is missing, fail to parse %s", v.Name, v.Revision)
@@ -314,4 +367,33 @@ func (v Project) UpdateBranchTracking(branch, remote, track string) {
 	}
 
 	v.SaveConfig(cfg)
+}
+
+// PublishedReference forms published reference for specific branch.
+func (v Repository) PublishedReference(branch string) string {
+	pub := config.RefsPub + branch
+
+	if v.RevisionIsValid(pub) {
+		return pub
+	}
+	return ""
+}
+
+// PublishedRevision resolves published reference to revision id.
+func (v Repository) PublishedRevision(branch string) string {
+	raw := v.Raw()
+	if strings.HasPrefix(branch, config.RefsHeads) {
+		branch = strings.TrimPrefix(branch, config.RefsHeads)
+	}
+	pub := config.RefsPub + branch
+
+	if raw == nil {
+		return ""
+	}
+
+	revid, err := raw.ResolveRevision(plumbing.Revision(pub))
+	if err == nil {
+		return revid.String()
+	}
+	return ""
 }

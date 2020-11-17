@@ -218,35 +218,6 @@ func (v Project) CleanPublishedCache() error {
 	return nil
 }
 
-// PublishedReference forms published reference for specific branch.
-func (v Project) PublishedReference(branch string) string {
-	pub := config.RefsPub + branch
-
-	if v.RevisionIsValid(pub) {
-		return pub
-	}
-	return ""
-}
-
-// PublishedRevision resolves published reference to revision id.
-func (v Project) PublishedRevision(branch string) string {
-	raw := v.Raw()
-	if strings.HasPrefix(branch, config.RefsHeads) {
-		branch = strings.TrimPrefix(branch, config.RefsHeads)
-	}
-	pub := config.RefsPub + branch
-
-	if raw == nil {
-		return ""
-	}
-
-	revid, err := raw.ResolveRevision(plumbing.Revision(pub))
-	if err == nil {
-		return revid.String()
-	}
-	return ""
-}
-
 // GitRepository returns go-git's repository object for project worktree.
 func (v *Project) GitRepository() (*git.Repository, error) {
 	return git.PlainOpen(v.WorkDir)
